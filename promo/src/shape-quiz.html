@@ -1,0 +1,46 @@
+<!doctype html>
+<!-- 県の形クイズの画像。?pref=3&mode=prompt|answer を付けて開き、1080x1350で画面キャプチャして保存する -->
+<html lang="ja"><head><meta charset="utf-8">
+<style>
+  html,body{margin:0}
+  body{width:1080px;height:1350px;overflow:hidden;position:relative;background:#f7f1e3;color:#1d2433;
+    font-family:"Hiragino Sans","Noto Sans JP","Yu Gothic",Meiryo,sans-serif}
+  .chip{position:absolute;left:100px;top:70px;padding:10px 28px;border:4px solid #1d2433;border-radius:999px;background:#e8503a;color:#fff;font-size:38px;font-weight:800}
+  h1{position:absolute;left:100px;top:176px;margin:0;font-size:106px;line-height:1.2;font-weight:900;letter-spacing:.02em}
+  .frame{position:absolute;left:100px;top:470px;width:880px;height:640px;box-sizing:border-box;border:6px solid #d9d0ba;border-radius:28px;background:#fffdf6;overflow:hidden}
+  .frame svg{position:absolute;inset:0;width:100%;height:100%}
+  .cap{position:absolute;left:100px;top:1130px;width:880px;margin:0;font-size:52px;font-weight:800;line-height:1.4}
+  .cap small{display:block;margin-top:6px;font-size:36px;font-weight:600;color:#5d6577}
+  .tag{position:absolute;right:100px;bottom:26px;font-size:28px;font-weight:700;color:#8a8268}
+</style></head><body>
+<div class="chip" id="chip"></div>
+<h1 id="title"></h1>
+<div class="frame" id="frame"></div>
+<p class="cap" id="cap"></p>
+<div class="tag">脳内日本地図 公開中</div>
+<script src="../../js/data.js"></script>
+<script>
+  const q = new URLSearchParams(location.search);
+  const id = Number(q.get('pref') || 3), mode = q.get('mode') || 'prompt';
+  const M = window.MAP, p = M.prefs.find((x) => x.id === id);
+  const names = { 3: '岩手県' };
+  const name = p.name;
+  document.getElementById('chip').textContent = mode === 'prompt' ? 'お題' : '答え合わせ';
+  document.getElementById('title').innerHTML = mode === 'prompt' ? `${name}の形、<br>描ける?` : `${name}は、<br>こんな形でした`;
+  document.getElementById('cap').innerHTML = mode === 'prompt'
+    ? '記憶だけで、指で描いてみて。<small>描けたら、画像で返信してね</small>'
+    : 'あなたの絵は、近かった?<small>次の県も出してほしければ、教えてね</small>';
+  if (mode === 'answer') {
+    // 緯度による横幅のゆがみ(地図全体で1つの緯度の補正にしている)を、この県の緯度で直す
+    const lat = 39.7, lat0 = 34.8;  // 岩手県の中心付近 / 地図の中央緯度(近似)
+    const sx = Math.cos(lat * Math.PI / 180) / Math.cos(lat0 * Math.PI / 180);
+    const w = p.bw * sx, h = p.bh, pad = 70;
+    const sc = Math.min((880 - pad * 2) / w, (640 - pad * 2) / h);
+    const svg = `<svg viewBox="0 0 880 640" xmlns="http://www.w3.org/2000/svg">
+      <g transform="translate(${440 - (p.cx * sx) * sc} ${320 - p.cy * sc}) scale(${sx * sc} ${sc})">
+        <path d="${p.d}" fill="#38a89d" fill-opacity=".92" stroke="#1d2433" stroke-width="${3 / sc}" stroke-linejoin="round" fill-rule="evenodd"/>
+      </g></svg>`;
+    document.getElementById('frame').innerHTML = svg;
+  }
+</script>
+</body></html>
