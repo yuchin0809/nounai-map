@@ -18,7 +18,8 @@
 3. `Branch` にこのコードがあるブランチ(`/ (root)`)を選んで `Save`
 4. 1〜2分後に `https://<ユーザー名>.github.io/<リポジトリ名>/` で遊べる
 
-公開URLがこの README のものと違う場合は、`index.html` の `og:image` と `og:url` の
+想定している公開URLは `https://yuchin0809.github.io/nounai-map/` です(リポジトリ名を `nounai-map` にした場合)。
+リポジトリ名を変えない・別の名前にする場合は、`index.html` の `og:image` と `og:url` の
 URLを実際のものに変えてください(Xのプレビュー画像に使われます)。
 
 ## 採点のしくみ
