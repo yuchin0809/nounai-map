@@ -573,12 +573,10 @@
 
     x.fillStyle = '#1d2433';
     x.font = `700 24px ${FONT}`;
-    x.fillText('あなたの脳内の日本は?', X0, 588);
+    x.fillText('あなたの脳内の日本は?', X0, 566);
     x.fillStyle = '#5d6577';
     x.font = `500 20px ${FONT}`;
-    x.textAlign = 'right';
-    x.fillText(location.host + location.pathname, W - 30, 598);
-    x.textAlign = 'left';
+    x.fillText(location.host + location.pathname, X0, 600);
     return c;
   }
 
