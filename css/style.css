@@ -137,15 +137,17 @@ h1 { margin: 4px 0 0; font-size: 2.2rem; letter-spacing: .04em; }
 .tray { fill: #efe7d1; }
 .tray-label { fill: #a79d82; font-size: 26px; font-weight: 700; text-anchor: middle; }
 
-.piece { stroke: #fff; stroke-width: 1.6; stroke-linejoin: round; fill-opacity: .88; fill-rule: evenodd; }
+/* 輪郭線は、拡大しても画面上で同じ太さにする */
+.piece { stroke: #fff; stroke-width: .8px; vector-effect: non-scaling-stroke; stroke-linejoin: round; fill-opacity: .88; fill-rule: evenodd; }
 .piece.r0 { fill: var(--r0); } .piece.r1 { fill: var(--r1); } .piece.r2 { fill: var(--r2); } .piece.r3 { fill: var(--r3); }
 .piece.r4 { fill: var(--r4); } .piece.r5 { fill: var(--r5); } .piece.r6 { fill: var(--r6); } .piece.r7 { fill: var(--r7); }
 .anchor .piece { fill: #8b93a5; }
-.current .piece { stroke: var(--ink); stroke-width: 3; fill-opacity: 1; filter: drop-shadow(0 4px 5px rgba(0, 0, 0, .35)); }
+.current .piece { stroke: var(--ink); stroke-width: 1.6px; fill-opacity: 1; filter: drop-shadow(0 4px 5px rgba(0, 0, 0, .35)); }
 
 .anchor-mark circle { fill: none; stroke: var(--accent); stroke-width: 3.5; stroke-dasharray: 7 5; }
 .anchor-mark text { fill: var(--ink); font-size: 27px; font-weight: 800; text-anchor: middle; paint-order: stroke; stroke: #fffdf6; stroke-width: 7px; stroke-linejoin: round; }
 
+.zoomed .anchor-mark text { display: none; }
 .silhouette { fill: #ebe4d0; stroke: #fffdf6; stroke-width: 1.4; fill-rule: evenodd; }
 .ghost { fill: none; stroke: var(--ink); stroke-width: 1.8; stroke-dasharray: 6 5; opacity: .55; fill-rule: evenodd; }
 .miss { stroke: var(--accent); stroke-width: 3; stroke-linecap: round; }

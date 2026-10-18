@@ -5,7 +5,8 @@
   const NS = 'http://www.w3.org/2000/svg';
   const TRAY_H = 280;             // 縦長画面: 地図の下の「ピース置き場」の高さ
   const TRAY_W = 400;             // 横長画面: 地図の右の「ピース置き場」の幅
-  const ZOOMS = [1, 2.5, 4];      // 拡大ボタンの倍率(1が全体表示)
+  const ZOOM_STEPS = [2.5, 4];    // 拡大ボタンで切り替わる倍率(1が全体表示)
+  const ZOOM_MAX = 6;             // ピンチで拡大できる上限
   const LOUPE_UNITS = 170;        // ルーペが映す範囲(地図の座標単位)
   const ANCHOR_ID = 13;           // 最初から置いてある基準(東京都)
   const MAX_KM = 500;             // これ以上ズレたら0点
@@ -154,7 +155,11 @@
     S.cur = { p, g, tx: L.cx - p.cx, ty: L.cy - p.cy };
     setPos(g, S.cur.tx, S.cur.ty);
     // 次の県は、全体表示から始める
-    zoomLevel = 0;
+    pointers.clear();
+    drag = null;
+    pinch = null;
+    ignoreUntilAllUp = false;
+    zoom = 1;
     cancelAnimationFrame(viewAnim);
     applyView(fullView());
     updateZoomUi();
@@ -178,17 +183,19 @@
   const loupe = $('#loupe');
   const loupeView = $('#loupe-svg');
   const zoomBtn = $('#btn-zoom');
-  const ZOOM_LABELS = ['拡大', 'もっと拡大', '全体表示'];
   let drag = null;
-  let zoomLevel = 0;
+  let pinch = null;
+  let ignoreUntilAllUp = false; // ピンチのあと、残った1本の指では県を動かさない
+  const pointers = new Map();
+  let zoom = 1;                 // 1が全体表示
   let view = { x: 0, y: 0, w: 0, h: 0 };
   let viewAnim = 0;
-  let loupeCorner = 1; // 0:左上 1:右上 2:左下 3:右下
+  let loupeCorner = 1;          // 0:左上 1:右上 2:左下 3:右下
 
   const fullView = () => ({ x: 0, y: 0, w: L.vbw, h: L.vbh });
-  const viewAround = (level, cx, cy) => {
-    const w = L.vbw / ZOOMS[level];
-    const h = L.vbh / ZOOMS[level];
+  const viewAround = (z, cx, cy) => {
+    const w = L.vbw / z;
+    const h = L.vbh / z;
     return { x: clamp(cx - w / 2, 0, L.vbw - w), y: clamp(cy - h / 2, 0, L.vbh - h), w, h };
   };
   const applyView = (v) => {
@@ -196,6 +203,7 @@
     board.setAttribute('viewBox', `${v.x} ${v.y} ${v.w} ${v.h}`);
   };
   const curCenter = () => ({ x: S.cur.p.mx + S.cur.tx, y: S.cur.p.my + S.cur.ty });
+  const isZoomed = () => zoom > 1.15;
 
   function tweenView(to) {
     cancelAnimationFrame(viewAnim);
@@ -212,22 +220,24 @@
     viewAnim = requestAnimationFrame(step);
   }
 
-  function setZoom(level) {
+  // 拡大ボタン: 全体 → 2.5倍 → 4倍 → 全体
+  function cycleZoom() {
     if (S.phase !== 'play' || !S.cur) return;
-    zoomLevel = level;
+    zoom = !isZoomed() ? ZOOM_STEPS[0] : zoom < ZOOM_STEPS[1] - 0.2 ? ZOOM_STEPS[1] : 1;
     const c = curCenter();
-    tweenView(level === 0 ? fullView() : viewAround(level, c.x, c.y));
+    tweenView(zoom === 1 ? fullView() : viewAround(zoom, c.x, c.y));
     updateZoomUi();
   }
 
   function updateZoomUi() {
-    zoomBtn.textContent = ZOOM_LABELS[zoomLevel];
+    board.classList.toggle('zoomed', isZoomed());
+    zoomBtn.textContent = !isZoomed() ? '拡大' : zoom < ZOOM_STEPS[1] - 0.2 ? 'もっと拡大' : '全体表示';
     updateLoupe();
   }
 
   // 拡大中にピースが端へ寄ったら、表示範囲もついていく
   function followPiece() {
-    if (zoomLevel === 0) return;
+    if (!isZoomed()) return;
     const c = curCenter();
     const mx = view.w * 0.22;
     const my = view.h * 0.22;
@@ -243,7 +253,7 @@
   // 全体表示のとき、動かしている県の周りを拡大して見せる(県と重ならない角に出す)
   function updateLoupe() {
     const ctr = S.cur && S.phase === 'play' ? curCenter() : null;
-    const show = !!ctr && zoomLevel === 0 && (!!drag || (ctr.x < M.w && ctr.y < M.h));
+    const show = !!ctr && !isZoomed() && (!!drag || (ctr.x < M.w && ctr.y < M.h));
     loupe.hidden = !show;
     if (!show) return;
     loupeView.setAttribute('viewBox', `${ctr.x - LOUPE_UNITS / 2} ${ctr.y - LOUPE_UNITS / 2} ${LOUPE_UNITS} ${LOUPE_UNITS}`);
@@ -265,7 +275,7 @@
     loupe.style.transform = `translate(${spots[loupeCorner][0] - D / 2}px, ${spots[loupeCorner][1] - D / 2}px)`;
   }
 
-  // ---------- ドラッグ ----------
+  // ---------- ドラッグ(1本指)とピンチ(2本指) ----------
   const moveCur = (tx, ty) => {
     const c = S.cur;
     c.tx = clamp(tx, -c.p.cx, L.vbw - c.p.cx);
@@ -275,24 +285,70 @@
     updateLoupe();
   };
 
+  const twoPointers = () => {
+    const [a, b] = [...pointers.values()];
+    return { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 };
+  };
+
+  // 2本指の中点の下にある地図の点が、指に付いてくるように表示範囲を決める
+  function startPinch() {
+    cancelAnimationFrame(viewAnim);
+    const t = twoPointers();
+    const m = board.getScreenCTM();
+    pinch = {
+      d0: t.d, z0: zoom, a0: m.a,
+      left: m.a * view.x + m.e, top: m.d * view.y + m.f,   // 表示範囲の左上が画面のどこにあるか
+      px: (t.mx - m.e) / m.a, py: (t.my - m.f) / m.d,        // 中点の下にある地図の座標
+    };
+  }
+
+  function updatePinch() {
+    const t = twoPointers();
+    zoom = clamp(pinch.z0 * (t.d / pinch.d0), 1, ZOOM_MAX);
+    const a = pinch.a0 * (zoom / pinch.z0);
+    const w = L.vbw / zoom;
+    const h = L.vbh / zoom;
+    applyView({
+      x: clamp(pinch.px - (t.mx - pinch.left) / a, 0, L.vbw - w),
+      y: clamp(pinch.py - (t.my - pinch.top) / a, 0, L.vbh - h),
+      w, h,
+    });
+    updateZoomUi();
+  }
+
   board.addEventListener('pointerdown', (e) => {
     if (S.phase !== 'play' || !S.cur) return;
     board.setPointerCapture(e.pointerId);
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.size >= 2) {
+      drag = null;
+      ignoreUntilAllUp = true;
+      startPinch();
+      updateLoupe();
+      return;
+    }
+    if (ignoreUntilAllUp) return;
     // 画面のピクセルの動きから座標を求める(拡大中に表示範囲が動いてもズレない)
     drag = { x: e.clientX, y: e.clientY, tx: S.cur.tx, ty: S.cur.ty, k: board.getScreenCTM().a };
     updateLoupe();
   });
   board.addEventListener('pointermove', (e) => {
+    if (!pointers.has(e.pointerId)) return;
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pinch && pointers.size >= 2) { updatePinch(); return; }
     if (!drag || !S.cur) return;
     moveCur(drag.tx + (e.clientX - drag.x) / drag.k, drag.ty + (e.clientY - drag.y) / drag.k);
   });
-  const endDrag = () => {
+  const endPointer = (e) => {
+    pointers.delete(e.pointerId);
+    if (pointers.size < 2) pinch = null;
+    if (pointers.size === 0) ignoreUntilAllUp = false;
     drag = null;
     updateLoupe();
   };
-  board.addEventListener('pointerup', endDrag);
-  board.addEventListener('pointercancel', endDrag);
-  zoomBtn.addEventListener('click', () => setZoom((zoomLevel + 1) % ZOOMS.length));
+  board.addEventListener('pointerup', endPointer);
+  board.addEventListener('pointercancel', endPointer);
+  zoomBtn.addEventListener('click', cycleZoom);
 
   document.addEventListener('keydown', (e) => {
     if (S.phase !== 'play' || !S.cur || $('#dlg-share').open) return;
@@ -322,7 +378,7 @@
     }
 
     // 結果画面では、置き場と東京都の目印を隠して地図を大きく見せる
-    zoomLevel = 0;
+    zoom = 1;
     cancelAnimationFrame(viewAnim);
     applyView(L.vbw > M.w ? fullView() : { x: 0, y: 0, w: M.w, h: M.h });
     loupe.hidden = true;
