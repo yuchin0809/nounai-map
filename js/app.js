@@ -47,6 +47,13 @@
     return a;
   };
 
+  // アクセス解析(GoatCounter)に、回数だけを送る。誰が遊んだかは送らない。読み込めなくても何も起きない
+  const track = (path, title) => {
+    try {
+      if (window.goatcounter && window.goatcounter.count) window.goatcounter.count({ path, title, event: true });
+    } catch (_) { /* 解析が使えなくても遊べる */ }
+  };
+
   const storage = {
     get(k) { try { return localStorage.getItem(k); } catch (_) { return null; } },
     set(k, v) { try { localStorage.setItem(k, v); } catch (_) { /* 保存できなくても遊べる */ } },
@@ -135,6 +142,7 @@
     S.placed = [];
     S.cur = null;
     S.phase = 'play';
+    track('start-' + mode, mode + '県チャレンジ開始');
     // 横長の画面(PCなど)では、ピース置き場を地図の右に置いて盤面を大きく使う
     const wide = window.innerWidth / window.innerHeight > 1.25;
     document.body.classList.toggle('wide', wide);
@@ -366,6 +374,7 @@
   // ---------- 結果 ----------
   function finish() {
     S.phase = 'result';
+    track('finish-' + S.mode, S.mode + '県チャレンジ完走');
     const sum = S.placed.reduce((s, x) => s + x.score, 0);
     S.score = Math.round(sum / S.placed.length);
     S.worst = S.placed.slice().sort((a, b) => b.km - a.km).slice(0, 3);
@@ -584,6 +593,7 @@
   let cardFile = null;
 
   function openShare() {
+    track('share-open', 'シェア画面を開いた');
     const c = renderCard();
     c.toBlob((blob) => {
       if (cardUrl) URL.revokeObjectURL(cardUrl);
@@ -597,6 +607,7 @@
   }
 
   async function nativeShare() {
+    track('share-native', '画像つきで共有');
     try {
       await navigator.share({ files: [cardFile], text: shareText() + '\n' + gameUrl() });
     } catch (err) {
@@ -605,6 +616,7 @@
   }
 
   function shareToX() {
+    track('share-x', 'Xに投稿(文章のみ)');
     const u = 'https://twitter.com/intent/tweet?text=' + encodeURIComponent(shareText()) + '&url=' + encodeURIComponent(gameUrl());
     window.open(u, '_blank', 'noopener');
   }

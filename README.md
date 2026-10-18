@@ -49,6 +49,12 @@ node tools/build-data.mjs simplified.json js/data.js
 - `tools/ogp.html` はXのプレビュー画像(`ogp.png`)の元です。1200x630で画面キャプチャして保存します
 - 手元で試すには `python3 -m http.server` などで配信して `index.html` を開く
 
+## アクセス解析
+
+アクセス数と、ゲームの開始・完走・シェアの回数を数えるため、[GoatCounter](https://www.goatcounter.com/) を使っています。
+Cookieは使わず、送るのは回数と、閲覧したページの情報だけです(誰が遊んだかは送りません)。
+`js/app.js` の `track()` が回数を送り、広告ブロッカーなどで読み込めなくても、ゲームは動きます。
+
 ## 地図データの出典
 
 地球地図日本(国土地理院ほか)の都道府県界を、
