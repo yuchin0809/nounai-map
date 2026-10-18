@@ -135,6 +135,7 @@
     L = wide
       ? { vbw: M.w + TRAY_W, vbh: M.h, cx: M.w + TRAY_W / 2, cy: M.h / 2 }
       : { vbw: M.w, vbh: M.h + TRAY_H, cx: M.w / 2, cy: M.h + TRAY_H / 2 };
+    board.style.setProperty('--aspect', String(L.vbw / L.vbh));
     buildBoard();
     showScreen('stage');
     $('#hud-play').hidden = false;
@@ -248,13 +249,16 @@
     loupeView.setAttribute('viewBox', `${ctr.x - LOUPE_UNITS / 2} ${ctr.y - LOUPE_UNITS / 2} ${LOUPE_UNITS} ${LOUPE_UNITS}`);
     const m = board.getScreenCTM();
     const wrap = board.parentElement.getBoundingClientRect();
+    const br = board.getBoundingClientRect();
+    const ox = br.left - wrap.left;
+    const oy = br.top - wrap.top;
     const D = loupe.offsetWidth;
     const gap = 8;
     const px = m.a * ctr.x + m.e - wrap.left;
     const py = m.d * ctr.y + m.f - wrap.top;
     const spots = [
-      [gap + D / 2, gap + D / 2], [wrap.width - gap - D / 2, gap + D / 2],
-      [gap + D / 2, wrap.height - gap - D / 2], [wrap.width - gap - D / 2, wrap.height - gap - D / 2],
+      [ox + gap + D / 2, oy + gap + D / 2], [ox + br.width - gap - D / 2, oy + gap + D / 2],
+      [ox + gap + D / 2, oy + br.height - gap - D / 2], [ox + br.width - gap - D / 2, oy + br.height - gap - D / 2],
     ];
     const dist = (i) => Math.hypot(spots[i][0] - px, spots[i][1] - py);
     if (dist(loupeCorner) < D * 0.85) loupeCorner = [0, 1, 2, 3].reduce((a, b) => (dist(b) > dist(a) ? b : a));
@@ -320,7 +324,7 @@
     // 結果画面では、置き場と東京都の目印を隠して地図を大きく見せる
     zoomLevel = 0;
     cancelAnimationFrame(viewAnim);
-    applyView({ x: 0, y: 0, w: M.w, h: M.h });
+    applyView(L.vbw > M.w ? fullView() : { x: 0, y: 0, w: M.w, h: M.h });
     loupe.hidden = true;
     world.querySelectorAll('.tray, .tray-label').forEach((n) => { n.style.display = 'none'; });
     layers.placed.querySelector('.anchor-mark').style.display = 'none';
@@ -421,12 +425,11 @@
     roundRectPath(x, ox, oy, size, size, 22);
     x.clip();
     // 配置した県と正解位置が収まる範囲に寄せて、地図をできるだけ大きく見せる
-    let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+    let bx0 = 0, by0 = 0, bx1 = M.w, by1 = M.h;
     const grow = (p, tx, ty) => {
       bx0 = Math.min(bx0, p.cx + tx - p.bw / 2); bx1 = Math.max(bx1, p.cx + tx + p.bw / 2);
       by0 = Math.min(by0, p.cy + ty - p.bh / 2); by1 = Math.max(by1, p.cy + ty + p.bh / 2);
     };
-    for (const p of M.prefs) grow(p, 0, 0);
     for (const q of S.placed) grow(q.p, q.tx, q.ty);
     const room = size - inner * 2 - 20;
     const s = Math.min(room / (bx1 - bx0), room / (by1 - by0));
