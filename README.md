@@ -53,5 +53,7 @@ node tools/build-data.mjs simplified.json js/data.js
 
 地球地図日本(国土地理院ほか)の都道府県界を、
 [dataofjapan/land](https://github.com/dataofjapan/land) が変換したGeoJSONから、
-簡略化・加工して利用しています。出典の明記が利用条件です(非商用での利用)。
-広告や課金を付ける場合は、利用条件を再確認してください。
+簡略化・加工して利用しています。
+
+- 変換元の README([dataofjapan/land](https://github.com/dataofjapan/land))では、非商用なら「出典の明記」、商用なら「出典の明記+著作権者(地球地図日本)への利用報告」とされています。
+- 国土地理院のページでは、個別の商用可否の記載を確認できていません(2026-10-18時点)。広告や課金を付ける場合は、先に利用条件を原文で確認してください。
