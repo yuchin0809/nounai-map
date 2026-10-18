@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>脳内日本地図 | 都道府県、記憶だけで置けますか?</title>
+<meta name="description" content="47都道府県のピースを、記憶だけで日本地図に置いていく無料ゲーム。あなたの脳内の日本は、どれくらいズレている?">
+<meta name="theme-color" content="#f7f1e3">
+<meta property="og:type" content="website">
+<meta property="og:title" content="脳内日本地図">
+<meta property="og:description" content="都道府県を、記憶だけで地図に置けますか? あなたの脳内の日本は、どれくらいズレている?">
+<meta property="og:image" content="https://yuchin0809.github.io/yugames/ogp.png">
+<meta property="og:url" content="https://yuchin0809.github.io/yugames/">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23e8503a'/%3E%3Cpath d='M20 4l5 3-2 6-3 3 1 5-4 7-3-4 2-5-3-4 3-4z' fill='%23fff'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<main id="app">
+
+  <section id="screen-start" class="screen">
+    <svg id="hero" aria-hidden="true"></svg>
+    <h1>脳内日本地図</h1>
+    <p class="lead">都道府県の形を、<br>記憶だけで地図に置けますか?</p>
+    <div class="modes">
+      <button class="btn primary" data-mode="10">10県チャレンジ<small>ランダム10県 / 約1分</small></button>
+      <button class="btn" data-mode="47">全47県チャレンジ<small>日本を丸ごと / 約5分</small></button>
+    </div>
+    <p id="best" class="best"></p>
+    <p class="credit">地図データ: 地球地図日本(国土地理院ほか)を加工して作成</p>
+  </section>
+
+  <section id="screen-stage" class="screen" hidden>
+    <header class="hud" id="hud-play">
+      <span class="hud-progress" id="hud-progress"></span>
+      <span class="hud-label">置く県</span>
+      <strong class="hud-name" id="hud-name"></strong>
+    </header>
+    <header class="hud" id="hud-result" hidden>
+      <span class="hud-label" id="result-mode"></span>
+      <strong class="hud-name" id="result-rank"></strong>
+    </header>
+
+    <svg id="board" role="img" aria-label="日本地図"></svg>
+
+    <div id="panel-play" class="panel">
+      <p class="hint">画面のどこをドラッグしても県が動きます</p>
+      <button id="btn-place" class="btn primary wide">ここに置く</button>
+    </div>
+
+    <div id="panel-result" class="panel" hidden>
+      <div class="score"><span id="score-num">0</span><span class="score-unit">点</span></div>
+      <p id="score-worst" class="worst"></p>
+      <div class="result-actions">
+        <button id="btn-share" class="btn primary wide">結果をシェアする</button>
+        <button id="btn-answer" class="btn wide">答え合わせ</button>
+        <div class="row">
+          <button id="btn-retry" class="btn">もう一回</button>
+          <button id="btn-home" class="btn">モード選択へ</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<dialog id="dlg-share">
+  <img id="share-img" alt="シェア用の結果画像">
+  <p class="note">画像を保存して投稿に添付すると、結果がそのまま伝わります。</p>
+  <div class="dlg-actions">
+    <button id="btn-native" class="btn primary wide" hidden>画像つきで共有</button>
+    <button id="btn-x" class="btn wide">Xに投稿する(文章のみ)</button>
+    <a id="btn-save" class="btn wide" download="nainichizu.png">画像を保存</a>
+    <button id="btn-close" class="btn ghost wide">閉じる</button>
+  </div>
+</dialog>
+
+<script src="js/data.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

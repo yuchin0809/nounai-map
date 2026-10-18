@@ -1,0 +1,42 @@
+<!doctype html>
+<!-- Xなどに貼ったときのプレビュー画像(ogp.png)の元。1200x630で画面キャプチャして ogp.png に保存する -->
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; }
+  body { width: 1200px; height: 630px; overflow: hidden; background: #f7f1e3; color: #1d2433;
+    font-family: "Hiragino Sans", "Noto Sans JP", "Yu Gothic", Meiryo, sans-serif; position: relative; }
+  h1 { position: absolute; left: 70px; top: 150px; margin: 0; font-size: 112px; letter-spacing: .03em; }
+  p { position: absolute; left: 74px; top: 300px; margin: 0; font-size: 44px; line-height: 1.55; color: #5d6577; font-weight: 600; }
+  .chips { position: absolute; left: 74px; top: 470px; display: flex; gap: 14px; }
+  .chips span { padding: 10px 22px; border: 3px solid #1d2433; border-radius: 999px; background: #fffaf0; font-size: 28px; font-weight: 800; }
+  .chips span.hot { background: #e8503a; color: #fff; }
+  svg { position: absolute; right: 20px; top: 20px; width: 590px; height: 590px; }
+  .piece { stroke: #fff; stroke-width: 1.8; fill-opacity: .9; fill-rule: evenodd; }
+</style>
+</head>
+<body>
+<h1>脳内日本地図</h1>
+<p>都道府県、<br>記憶だけで置けますか?</p>
+<div class="chips"><span class="hot">無料</span><span>登録なし</span><span>1分で遊べる</span></div>
+<svg id="hero"></svg>
+<script src="../js/data.js"></script>
+<script>
+  const M = window.MAP, NS = 'http://www.w3.org/2000/svg';
+  const COLORS = ['#5b8def', '#38a89d', '#f0a92b', '#e8743b', '#d9487d', '#8d6bd1', '#6fae3a', '#b8793a'];
+  const hero = document.getElementById('hero');
+  hero.setAttribute('viewBox', `-120 -90 ${M.w + 240} ${M.h + 180}`);
+  let seed = 11;
+  const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  for (const p of M.prefs) {
+    const path = document.createElementNS(NS, 'path');
+    path.setAttribute('d', p.d);
+    path.setAttribute('class', 'piece');
+    path.setAttribute('fill', COLORS[p.region]);
+    path.setAttribute('transform', `translate(${(rnd() - 0.5) * 300} ${(rnd() - 0.5) * 300})`);
+    hero.appendChild(path);
+  }
+</script>
+</body>
+</html>

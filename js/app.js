@@ -1,0 +1,457 @@
+(() => {
+  'use strict';
+
+  const M = window.MAP;
+  const NS = 'http://www.w3.org/2000/svg';
+  const TRAY = 280;               // 地図の下の「ピース置き場」の高さ
+  const VBH = M.h + TRAY;
+  const ANCHOR_ID = 13;           // 最初から置いてある基準(東京都)
+  const MAX_KM = 500;             // これ以上ズレたら0点
+  const REGION_COLORS = ['#5b8def', '#38a89d', '#f0a92b', '#e8743b', '#d9487d', '#8d6bd1', '#6fae3a', '#b8793a'];
+  const RANKS = [
+    [90, '国土地理院レベル'], [75, '地図マスター'], [60, '日本通'], [40, '旅慣れた人'],
+    [25, 'ふわっと日本人'], [10, 'パラレルジャパン住人'], [0, '異世界の日本'],
+  ];
+
+  const $ = (s) => document.querySelector(s);
+  const board = $('#board');
+
+  const el = (name, attrs, parent) => {
+    const e = document.createElementNS(NS, name);
+    for (const k in attrs) e.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(e);
+    return e;
+  };
+  const setPos = (g, tx, ty) => g.setAttribute('transform', `translate(${tx} ${ty})`);
+  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+  const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+  const scoreOf = (km) => 100 * Math.pow(1 - Math.min(1, km / MAX_KM), 1.5);
+  const rankOf = (score) => RANKS.find((r) => score >= r[0])[1];
+  const fmtKm = (km) => (km < 10 ? Math.round(km) : Math.round(km / 10) * 10);
+
+  const shuffle = (arr) => {
+    const a = arr.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  };
+
+  const storage = {
+    get(k) { try { return localStorage.getItem(k); } catch (_) { return null; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch (_) { /* 保存できなくても遊べる */ } },
+  };
+
+  function makePiece(p) {
+    const g = el('g', {});
+    el('path', { d: p.d, class: 'piece r' + p.region }, g);
+    return g;
+  }
+
+  // ---------- 状態 ----------
+  const S = { mode: 10, queue: [], idx: 0, placed: [], cur: null, phase: 'start', anim: 0, score: 0, worst: [] };
+  let layers = null;
+
+  // ---------- 画面切り替え ----------
+  function showScreen(name) {
+    $('#screen-start').hidden = name !== 'start';
+    $('#screen-stage').hidden = name !== 'stage';
+    S.phase = name === 'start' ? 'start' : S.phase;
+    window.scrollTo(0, 0);
+  }
+
+  function renderBest() {
+    const b10 = storage.get('nainichizu.best.10');
+    const b47 = storage.get('nainichizu.best.47');
+    $('#best').textContent = b10 || b47
+      ? `自己ベスト  10県: ${b10 ? b10 + '点' : '--'} / 47県: ${b47 ? b47 + '点' : '--'}`
+      : '';
+  }
+
+  // ---------- スタート画面の「ぐちゃぐちゃ日本」 ----------
+  function buildHero() {
+    const hero = $('#hero');
+    hero.setAttribute('viewBox', `-70 -70 ${M.w + 140} ${M.h + 140}`);
+    let seed = 7;
+    const rnd = () => {
+      seed = (seed + 0x6d2b79f5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    for (const p of M.prefs) {
+      const g = makePiece(p);
+      setPos(g, (rnd() - 0.5) * 260, (rnd() - 0.5) * 260);
+      hero.appendChild(g);
+    }
+  }
+
+  // ---------- ゲーム盤 ----------
+  function buildBoard() {
+    board.replaceChildren();
+    board.setAttribute('viewBox', `0 0 ${M.w} ${VBH}`);
+    const gFrame = el('g', {}, board);
+    el('rect', { x: 0, y: M.h, width: M.w, height: TRAY, class: 'tray' }, gFrame);
+    const t = el('text', { x: M.w / 2, y: M.h + TRAY - 14, class: 'tray-label' }, gFrame);
+    t.textContent = 'ここから動かす';
+    el('rect', { x: 1.5, y: 1.5, width: M.w - 3, height: M.h - 3, rx: 14, class: 'frame' }, gFrame);
+    layers = {
+      ghost: el('g', { class: 'fade' }, board),
+      placed: el('g', {}, board),
+      miss: el('g', { class: 'fade' }, board),
+      cur: el('g', {}, board),
+    };
+    const anchor = M.prefs.find((p) => p.id === ANCHOR_ID);
+    const ag = makePiece(anchor);
+    ag.classList.add('anchor');
+    layers.placed.appendChild(ag);
+    const mark = el('g', { class: 'anchor-mark' }, layers.placed);
+    el('circle', { cx: anchor.mx, cy: anchor.my, r: 20 }, mark);
+    const label = el('text', { x: anchor.mx, y: anchor.my - 30 }, mark);
+    label.textContent = '東京都(基準)';
+  }
+
+  function start(mode) {
+    cancelAnimationFrame(S.anim);
+    S.anim = 0;
+    S.mode = mode;
+    const rest = shuffle(M.prefs.filter((p) => p.id !== ANCHOR_ID));
+    S.queue = mode === 10 ? rest.slice(0, 10) : rest;
+    S.idx = 0;
+    S.placed = [];
+    S.cur = null;
+    S.phase = 'play';
+    buildBoard();
+    showScreen('stage');
+    $('#hud-play').hidden = false;
+    $('#hud-result').hidden = true;
+    $('#panel-play').hidden = false;
+    $('#panel-result').hidden = true;
+    nextPiece();
+  }
+
+  function nextPiece() {
+    if (S.idx >= S.queue.length) return finish();
+    const p = S.queue[S.idx];
+    const g = makePiece(p);
+    g.classList.add('current');
+    layers.cur.appendChild(g);
+    S.cur = { p, g, tx: M.w / 2 - p.cx, ty: M.h + TRAY / 2 - p.cy };
+    setPos(g, S.cur.tx, S.cur.ty);
+    $('#hud-name').textContent = p.name;
+    $('#hud-progress').textContent = `${S.idx + 1} / ${S.queue.length}`;
+  }
+
+  function place() {
+    if (S.phase !== 'play' || !S.cur) return;
+    const { p, g, tx, ty } = S.cur;
+    g.classList.remove('current');
+    layers.placed.appendChild(g);
+    const km = Math.hypot(tx, ty) * M.kmPerUnit;
+    S.placed.push({ p, g, tx, ty, km, score: scoreOf(km) });
+    S.cur = null;
+    S.idx++;
+    nextPiece();
+  }
+
+  // ---------- ドラッグ ----------
+  let drag = null;
+  const svgPoint = (e) => {
+    const pt = board.createSVGPoint();
+    pt.x = e.clientX;
+    pt.y = e.clientY;
+    return pt.matrixTransform(board.getScreenCTM().inverse());
+  };
+  const moveCur = (tx, ty) => {
+    const c = S.cur;
+    c.tx = clamp(tx, -c.p.cx, M.w - c.p.cx);
+    c.ty = clamp(ty, -c.p.cy, VBH - c.p.cy);
+    setPos(c.g, c.tx, c.ty);
+  };
+
+  board.addEventListener('pointerdown', (e) => {
+    if (S.phase !== 'play' || !S.cur) return;
+    board.setPointerCapture(e.pointerId);
+    const p = svgPoint(e);
+    drag = { px: p.x, py: p.y, tx: S.cur.tx, ty: S.cur.ty };
+  });
+  board.addEventListener('pointermove', (e) => {
+    if (!drag || !S.cur) return;
+    const p = svgPoint(e);
+    moveCur(drag.tx + p.x - drag.px, drag.ty + p.y - drag.py);
+  });
+  const endDrag = () => { drag = null; };
+  board.addEventListener('pointerup', endDrag);
+  board.addEventListener('pointercancel', endDrag);
+
+  document.addEventListener('keydown', (e) => {
+    if (S.phase !== 'play' || !S.cur || $('#dlg-share').open) return;
+    const step = e.shiftKey ? 24 : 6;
+    const d = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[e.key];
+    if (d) { e.preventDefault(); moveCur(S.cur.tx + d[0], S.cur.ty + d[1]); }
+    else if (e.key === 'Enter' && document.activeElement === document.body) { e.preventDefault(); place(); }
+  });
+
+  // ---------- 結果 ----------
+  function finish() {
+    S.phase = 'result';
+    const sum = S.placed.reduce((s, x) => s + x.score, 0);
+    S.score = Math.round(sum / S.placed.length);
+    S.worst = S.placed.slice().sort((a, b) => b.km - a.km).slice(0, 3);
+
+    const placedIds = new Set(S.placed.map((x) => x.p.id));
+    for (const p of M.prefs) {
+      if (p.id === ANCHOR_ID || placedIds.has(p.id)) continue;
+      el('path', { d: p.d, class: 'silhouette' }, layers.ghost);
+    }
+    for (const x of S.placed) el('path', { d: x.p.d, class: 'ghost' }, layers.ghost);
+    for (const x of S.worst) {
+      if (x.km < 30) continue;
+      el('line', { x1: x.p.mx + x.tx, y1: x.p.my + x.ty, x2: x.p.mx, y2: x.p.my, class: 'miss' }, layers.miss);
+      el('circle', { cx: x.p.mx, cy: x.p.my, r: 7, class: 'miss-dot' }, layers.miss);
+    }
+
+    // 結果画面では、置き場と東京都の目印を隠して地図を大きく見せる
+    board.setAttribute('viewBox', `0 0 ${M.w} ${M.h}`);
+    layers.placed.querySelector('.anchor-mark').style.display = 'none';
+
+    $('#hud-play').hidden = true;
+    $('#hud-result').hidden = false;
+    $('#result-mode').textContent = `${S.mode}県チャレンジ`;
+    $('#result-rank').textContent = rankOf(S.score);
+    $('#panel-play').hidden = true;
+    $('#panel-result').hidden = false;
+    $('#btn-answer').textContent = '答え合わせ';
+
+    const worstBox = $('#score-worst');
+    worstBox.replaceChildren();
+    S.worst.forEach((x, i) => {
+      const span = document.createElement('span');
+      span.textContent = `${i === 0 ? '最大のズレ ' : ''}${x.p.name} ${fmtKm(x.km)}km`;
+      worstBox.appendChild(span);
+    });
+
+    const key = `nainichizu.best.${S.mode}`;
+    const prev = Number(storage.get(key));
+    if (!prev || S.score > prev) storage.set(key, String(S.score));
+
+    countUp($('#score-num'), S.score);
+  }
+
+  function countUp(node, to) {
+    const t0 = performance.now();
+    const step = (now) => {
+      const k = clamp((now - t0) / 700, 0, 1);
+      node.textContent = Math.round(to * ease(k));
+      if (k < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }
+
+  function animateAnswer() {
+    if (S.phase !== 'result') return;
+    cancelAnimationFrame(S.anim);
+    for (const x of S.placed) setPos(x.g, x.tx, x.ty);
+    layers.miss.style.opacity = 0;
+    const DUR = 1100;
+    const STAG = Math.min(70, 1500 / S.placed.length);
+    const t0 = performance.now();
+    $('#btn-answer').textContent = 'もう一度見る';
+    const frame = (now) => {
+      let done = true;
+      S.placed.forEach((x, i) => {
+        const k = clamp((now - t0 - i * STAG) / DUR, 0, 1);
+        const e = ease(k);
+        setPos(x.g, x.tx * (1 - e), x.ty * (1 - e));
+        if (k < 1) done = false;
+      });
+      S.anim = done ? 0 : requestAnimationFrame(frame);
+    };
+    S.anim = requestAnimationFrame(frame);
+  }
+
+  // ---------- シェア画像 ----------
+  const gameUrl = () => location.origin + location.pathname;
+
+  function shareText() {
+    const w = S.worst[0];
+    return `脳内日本地図 ${S.mode}県チャレンジ\n${S.score}点「${rankOf(S.score)}」\n最大のズレは${w.p.name}(${fmtKm(w.km)}km)\nあなたの脳内の日本は?\n#脳内日本地図`;
+  }
+
+  function roundRectPath(x, ox, oy, w, h, r) {
+    x.beginPath();
+    x.moveTo(ox + r, oy);
+    x.arcTo(ox + w, oy, ox + w, oy + h, r);
+    x.arcTo(ox + w, oy + h, ox, oy + h, r);
+    x.arcTo(ox, oy + h, ox, oy, r);
+    x.arcTo(ox, oy, ox + w, oy, r);
+    x.closePath();
+  }
+
+  function renderCard() {
+    const W = 1200, H = 630;
+    const c = document.createElement('canvas');
+    c.width = W; c.height = H;
+    const x = c.getContext('2d');
+    const FONT = '"Hiragino Sans","Hiragino Kaku Gothic ProN","Noto Sans JP","Yu Gothic",Meiryo,sans-serif';
+
+    x.fillStyle = '#f7f1e3';
+    x.fillRect(0, 0, W, H);
+
+    // 地図パネル
+    const size = 570, ox = 30, oy = 30, inner = 14;
+    roundRectPath(x, ox, oy, size, size, 22);
+    x.fillStyle = '#fffdf6';
+    x.fill();
+    x.lineWidth = 3;
+    x.strokeStyle = '#d9d0ba';
+    x.stroke();
+
+    x.save();
+    roundRectPath(x, ox, oy, size, size, 22);
+    x.clip();
+    // 配置した県と正解位置が収まる範囲に寄せて、地図をできるだけ大きく見せる
+    let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+    const grow = (p, tx, ty) => {
+      bx0 = Math.min(bx0, p.cx + tx - p.bw / 2); bx1 = Math.max(bx1, p.cx + tx + p.bw / 2);
+      by0 = Math.min(by0, p.cy + ty - p.bh / 2); by1 = Math.max(by1, p.cy + ty + p.bh / 2);
+    };
+    for (const p of M.prefs) grow(p, 0, 0);
+    for (const q of S.placed) grow(q.p, q.tx, q.ty);
+    const room = size - inner * 2 - 20;
+    const s = Math.min(room / (bx1 - bx0), room / (by1 - by0));
+    const offX = ox + size / 2 - ((bx0 + bx1) / 2) * s;
+    const offY = oy + size / 2 - ((by0 + by1) / 2) * s;
+    const at = (tx, ty) => x.setTransform(s, 0, 0, s, offX + tx * s, offY + ty * s);
+    const anchor = M.prefs.find((p) => p.id === ANCHOR_ID);
+    const draw = (p, tx, ty, fill, alpha) => {
+      at(tx, ty);
+      const path = new Path2D(p.d);
+      x.globalAlpha = alpha;
+      x.fillStyle = fill;
+      x.fill(path, 'evenodd');
+      x.globalAlpha = 1;
+      x.lineWidth = 2.4;
+      x.lineJoin = 'round';
+      x.strokeStyle = '#fff';
+      x.stroke(path);
+    };
+    const placedIds = new Set(S.placed.map((q) => q.p.id));
+    for (const p of M.prefs) if (p.id !== ANCHOR_ID && !placedIds.has(p.id)) draw(p, 0, 0, '#ebe4d0', 1);
+    draw(anchor, 0, 0, '#8b93a5', 1);
+    for (const p of S.placed) draw(p.p, p.tx, p.ty, REGION_COLORS[p.p.region], 0.9);
+    // 正解の輪郭
+    x.setLineDash([7, 6]);
+    for (const p of S.placed) {
+      at(0, 0);
+      x.lineWidth = 2.2;
+      x.strokeStyle = 'rgba(29,36,51,.5)';
+      x.stroke(new Path2D(p.p.d));
+    }
+    x.setLineDash([]);
+    // 大きくズレた県は、正解の位置まで線を引く
+    for (const p of S.worst) {
+      if (p.km < 30) continue;
+      at(0, 0);
+      x.lineWidth = 4 / s * 0.6;
+      x.lineCap = 'round';
+      x.strokeStyle = '#e8503a';
+      x.beginPath();
+      x.moveTo(p.p.mx + p.tx, p.p.my + p.ty);
+      x.lineTo(p.p.mx, p.p.my);
+      x.stroke();
+      x.fillStyle = '#e8503a';
+      x.beginPath();
+      x.arc(p.p.mx, p.p.my, 9 / s * 0.6, 0, Math.PI * 2);
+      x.fill();
+    }
+    x.restore();
+
+    // テキスト
+    const X0 = 650;
+    x.textBaseline = 'alphabetic';
+    x.fillStyle = '#1d2433';
+    x.font = `800 60px ${FONT}`;
+    x.fillText('脳内日本地図', X0, 112);
+    x.fillStyle = '#5d6577';
+    x.font = `600 28px ${FONT}`;
+    x.fillText(`${S.mode}県チャレンジ`, X0, 156);
+
+    x.fillStyle = '#e8503a';
+    x.font = `800 170px ${FONT}`;
+    x.fillText(String(S.score), X0, 330);
+    const numW = x.measureText(String(S.score)).width;
+    x.font = `800 52px ${FONT}`;
+    x.fillText('点', X0 + numW + 8, 330);
+
+    x.fillStyle = '#1d2433';
+    const rankText = `「${rankOf(S.score)}」`;
+    let rankPx = 44;
+    x.font = `800 ${rankPx}px ${FONT}`;
+    while (x.measureText(rankText).width > W - X0 - 30 && rankPx > 24) x.font = `800 ${--rankPx}px ${FONT}`;
+    x.fillText(rankText, X0, 400);
+
+    x.fillStyle = '#5d6577';
+    x.font = `600 26px ${FONT}`;
+    S.worst.slice(0, 3).forEach((w, i) => {
+      x.fillText(`${i === 0 ? '最大のズレ ' : ''}${w.p.name} ${fmtKm(w.km)}km`, X0, 452 + i * 38);
+    });
+
+    x.fillStyle = '#1d2433';
+    x.font = `700 24px ${FONT}`;
+    x.fillText('あなたの脳内の日本は?', X0, 588);
+    x.fillStyle = '#5d6577';
+    x.font = `500 20px ${FONT}`;
+    x.textAlign = 'right';
+    x.fillText(location.host + location.pathname, W - 30, 598);
+    x.textAlign = 'left';
+    return c;
+  }
+
+  let cardUrl = '';
+  let cardFile = null;
+
+  function openShare() {
+    const c = renderCard();
+    c.toBlob((blob) => {
+      if (cardUrl) URL.revokeObjectURL(cardUrl);
+      cardUrl = URL.createObjectURL(blob);
+      cardFile = new File([blob], 'nainichizu.png', { type: 'image/png' });
+      $('#share-img').src = cardUrl;
+      $('#btn-save').href = cardUrl;
+      $('#btn-native').hidden = !(navigator.canShare && navigator.canShare({ files: [cardFile] }));
+      $('#dlg-share').showModal();
+    }, 'image/png');
+  }
+
+  async function nativeShare() {
+    try {
+      await navigator.share({ files: [cardFile], text: shareText() + '\n' + gameUrl() });
+    } catch (err) {
+      if (err && err.name !== 'AbortError') console.warn(err);
+    }
+  }
+
+  function shareToX() {
+    const u = 'https://twitter.com/intent/tweet?text=' + encodeURIComponent(shareText()) + '&url=' + encodeURIComponent(gameUrl());
+    window.open(u, '_blank', 'noopener');
+  }
+
+  // ---------- イベント ----------
+  document.querySelectorAll('[data-mode]').forEach((b) => b.addEventListener('click', () => start(Number(b.dataset.mode))));
+  $('#btn-place').addEventListener('click', place);
+  $('#btn-answer').addEventListener('click', animateAnswer);
+  $('#btn-share').addEventListener('click', openShare);
+  $('#btn-retry').addEventListener('click', () => start(S.mode));
+  $('#btn-home').addEventListener('click', () => { cancelAnimationFrame(S.anim); renderBest(); showScreen('start'); });
+  $('#btn-native').addEventListener('click', nativeShare);
+  $('#btn-x').addEventListener('click', shareToX);
+  $('#btn-close').addEventListener('click', () => $('#dlg-share').close());
+
+  buildHero();
+  renderBest();
+
+  // 自動テスト用(画面確認で使う)
+  window.__game = { S, start, place };
+})();
