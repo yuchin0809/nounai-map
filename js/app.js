@@ -3,8 +3,10 @@
 
   const M = window.MAP;
   const NS = 'http://www.w3.org/2000/svg';
-  const TRAY = 280;               // 地図の下の「ピース置き場」の高さ
-  const VBH = M.h + TRAY;
+  const TRAY_H = 280;             // 縦長画面: 地図の下の「ピース置き場」の高さ
+  const TRAY_W = 400;             // 横長画面: 地図の右の「ピース置き場」の幅
+  const ZOOMS = [1, 2.5, 4];      // 拡大ボタンの倍率(1が全体表示)
+  const LOUPE_UNITS = 170;        // ルーペが映す範囲(地図の座標単位)
   const ANCHOR_ID = 13;           // 最初から置いてある基準(東京都)
   const MAX_KM = 500;             // これ以上ズレたら0点
   const REGION_COLORS = ['#5b8def', '#38a89d', '#f0a92b', '#e8743b', '#d9487d', '#8d6bd1', '#6fae3a', '#b8793a'];
@@ -22,6 +24,7 @@
     if (parent) parent.appendChild(e);
     return e;
   };
+  const world = el('g', { id: 'world' }, board);
   const setPos = (g, tx, ty) => g.setAttribute('transform', `translate(${tx} ${ty})`);
   const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
   const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
@@ -52,6 +55,7 @@
   // ---------- 状態 ----------
   const S = { mode: 10, queue: [], idx: 0, placed: [], cur: null, phase: 'start', anim: 0, score: 0, worst: [] };
   let layers = null;
+  let L = { vbw: M.w, vbh: M.h + TRAY_H, cx: M.w / 2, cy: M.h + TRAY_H / 2 }; // 盤面の大きさとピース置き場の中心
 
   // ---------- 画面切り替え ----------
   function showScreen(name) {
@@ -89,18 +93,21 @@
 
   // ---------- ゲーム盤 ----------
   function buildBoard() {
-    board.replaceChildren();
-    board.setAttribute('viewBox', `0 0 ${M.w} ${VBH}`);
-    const gFrame = el('g', {}, board);
-    el('rect', { x: 0, y: M.h, width: M.w, height: TRAY, class: 'tray' }, gFrame);
-    const t = el('text', { x: M.w / 2, y: M.h + TRAY - 14, class: 'tray-label' }, gFrame);
+    world.replaceChildren();
+    const gFrame = el('g', {}, world);
+    const wide = L.vbw > M.w;
+    const tray = wide
+      ? { x: M.w, y: 0, width: TRAY_W, height: M.h }
+      : { x: 0, y: M.h, width: M.w, height: TRAY_H };
+    el('rect', { ...tray, class: 'tray' }, gFrame);
+    const t = el('text', { x: tray.x + tray.width / 2, y: tray.y + tray.height - 14, class: 'tray-label' }, gFrame);
     t.textContent = 'ここから動かす';
     el('rect', { x: 1.5, y: 1.5, width: M.w - 3, height: M.h - 3, rx: 14, class: 'frame' }, gFrame);
     layers = {
-      ghost: el('g', { class: 'fade' }, board),
-      placed: el('g', {}, board),
-      miss: el('g', { class: 'fade' }, board),
-      cur: el('g', {}, board),
+      ghost: el('g', { class: 'fade' }, world),
+      placed: el('g', {}, world),
+      miss: el('g', { class: 'fade' }, world),
+      cur: el('g', {}, world),
     };
     const anchor = M.prefs.find((p) => p.id === ANCHOR_ID);
     const ag = makePiece(anchor);
@@ -122,6 +129,12 @@
     S.placed = [];
     S.cur = null;
     S.phase = 'play';
+    // 横長の画面(PCなど)では、ピース置き場を地図の右に置いて盤面を大きく使う
+    const wide = window.innerWidth / window.innerHeight > 1.25;
+    document.body.classList.toggle('wide', wide);
+    L = wide
+      ? { vbw: M.w + TRAY_W, vbh: M.h, cx: M.w + TRAY_W / 2, cy: M.h / 2 }
+      : { vbw: M.w, vbh: M.h + TRAY_H, cx: M.w / 2, cy: M.h + TRAY_H / 2 };
     buildBoard();
     showScreen('stage');
     $('#hud-play').hidden = false;
@@ -137,8 +150,13 @@
     const g = makePiece(p);
     g.classList.add('current');
     layers.cur.appendChild(g);
-    S.cur = { p, g, tx: M.w / 2 - p.cx, ty: M.h + TRAY / 2 - p.cy };
+    S.cur = { p, g, tx: L.cx - p.cx, ty: L.cy - p.cy };
     setPos(g, S.cur.tx, S.cur.ty);
+    // 次の県は、全体表示から始める
+    zoomLevel = 0;
+    cancelAnimationFrame(viewAnim);
+    applyView(fullView());
+    updateZoomUi();
     $('#hud-name').textContent = p.name;
     $('#hud-progress').textContent = `${S.idx + 1} / ${S.queue.length}`;
   }
@@ -155,35 +173,122 @@
     nextPiece();
   }
 
-  // ---------- ドラッグ ----------
+  // ---------- 表示範囲(拡大)とルーペ ----------
+  const loupe = $('#loupe');
+  const loupeView = $('#loupe-svg');
+  const zoomBtn = $('#btn-zoom');
+  const ZOOM_LABELS = ['拡大', 'もっと拡大', '全体表示'];
   let drag = null;
-  const svgPoint = (e) => {
-    const pt = board.createSVGPoint();
-    pt.x = e.clientX;
-    pt.y = e.clientY;
-    return pt.matrixTransform(board.getScreenCTM().inverse());
+  let zoomLevel = 0;
+  let view = { x: 0, y: 0, w: 0, h: 0 };
+  let viewAnim = 0;
+  let loupeCorner = 1; // 0:左上 1:右上 2:左下 3:右下
+
+  const fullView = () => ({ x: 0, y: 0, w: L.vbw, h: L.vbh });
+  const viewAround = (level, cx, cy) => {
+    const w = L.vbw / ZOOMS[level];
+    const h = L.vbh / ZOOMS[level];
+    return { x: clamp(cx - w / 2, 0, L.vbw - w), y: clamp(cy - h / 2, 0, L.vbh - h), w, h };
   };
+  const applyView = (v) => {
+    view = v;
+    board.setAttribute('viewBox', `${v.x} ${v.y} ${v.w} ${v.h}`);
+  };
+  const curCenter = () => ({ x: S.cur.p.mx + S.cur.tx, y: S.cur.p.my + S.cur.ty });
+
+  function tweenView(to) {
+    cancelAnimationFrame(viewAnim);
+    const from = view;
+    const t0 = performance.now();
+    const step = (now) => {
+      const e = ease(clamp((now - t0) / 180, 0, 1));
+      applyView({
+        x: from.x + (to.x - from.x) * e, y: from.y + (to.y - from.y) * e,
+        w: from.w + (to.w - from.w) * e, h: from.h + (to.h - from.h) * e,
+      });
+      if (e < 1) viewAnim = requestAnimationFrame(step);
+    };
+    viewAnim = requestAnimationFrame(step);
+  }
+
+  function setZoom(level) {
+    if (S.phase !== 'play' || !S.cur) return;
+    zoomLevel = level;
+    const c = curCenter();
+    tweenView(level === 0 ? fullView() : viewAround(level, c.x, c.y));
+    updateZoomUi();
+  }
+
+  function updateZoomUi() {
+    zoomBtn.textContent = ZOOM_LABELS[zoomLevel];
+    updateLoupe();
+  }
+
+  // 拡大中にピースが端へ寄ったら、表示範囲もついていく
+  function followPiece() {
+    if (zoomLevel === 0) return;
+    const c = curCenter();
+    const mx = view.w * 0.22;
+    const my = view.h * 0.22;
+    let { x, y } = view;
+    if (c.x < x + mx) x = c.x - mx;
+    else if (c.x > x + view.w - mx) x = c.x - view.w + mx;
+    if (c.y < y + my) y = c.y - my;
+    else if (c.y > y + view.h - my) y = c.y - view.h + my;
+    cancelAnimationFrame(viewAnim);
+    applyView({ ...view, x: clamp(x, 0, L.vbw - view.w), y: clamp(y, 0, L.vbh - view.h) });
+  }
+
+  // 全体表示のとき、動かしている県の周りを拡大して見せる(県と重ならない角に出す)
+  function updateLoupe() {
+    const ctr = S.cur && S.phase === 'play' ? curCenter() : null;
+    const show = !!ctr && zoomLevel === 0 && (!!drag || (ctr.x < M.w && ctr.y < M.h));
+    loupe.hidden = !show;
+    if (!show) return;
+    loupeView.setAttribute('viewBox', `${ctr.x - LOUPE_UNITS / 2} ${ctr.y - LOUPE_UNITS / 2} ${LOUPE_UNITS} ${LOUPE_UNITS}`);
+    const m = board.getScreenCTM();
+    const wrap = board.parentElement.getBoundingClientRect();
+    const D = loupe.offsetWidth;
+    const gap = 8;
+    const px = m.a * ctr.x + m.e - wrap.left;
+    const py = m.d * ctr.y + m.f - wrap.top;
+    const spots = [
+      [gap + D / 2, gap + D / 2], [wrap.width - gap - D / 2, gap + D / 2],
+      [gap + D / 2, wrap.height - gap - D / 2], [wrap.width - gap - D / 2, wrap.height - gap - D / 2],
+    ];
+    const dist = (i) => Math.hypot(spots[i][0] - px, spots[i][1] - py);
+    if (dist(loupeCorner) < D * 0.85) loupeCorner = [0, 1, 2, 3].reduce((a, b) => (dist(b) > dist(a) ? b : a));
+    loupe.style.transform = `translate(${spots[loupeCorner][0] - D / 2}px, ${spots[loupeCorner][1] - D / 2}px)`;
+  }
+
+  // ---------- ドラッグ ----------
   const moveCur = (tx, ty) => {
     const c = S.cur;
-    c.tx = clamp(tx, -c.p.cx, M.w - c.p.cx);
-    c.ty = clamp(ty, -c.p.cy, VBH - c.p.cy);
+    c.tx = clamp(tx, -c.p.cx, L.vbw - c.p.cx);
+    c.ty = clamp(ty, -c.p.cy, L.vbh - c.p.cy);
     setPos(c.g, c.tx, c.ty);
+    followPiece();
+    updateLoupe();
   };
 
   board.addEventListener('pointerdown', (e) => {
     if (S.phase !== 'play' || !S.cur) return;
     board.setPointerCapture(e.pointerId);
-    const p = svgPoint(e);
-    drag = { px: p.x, py: p.y, tx: S.cur.tx, ty: S.cur.ty };
+    // 画面のピクセルの動きから座標を求める(拡大中に表示範囲が動いてもズレない)
+    drag = { x: e.clientX, y: e.clientY, tx: S.cur.tx, ty: S.cur.ty, k: board.getScreenCTM().a };
+    updateLoupe();
   });
   board.addEventListener('pointermove', (e) => {
     if (!drag || !S.cur) return;
-    const p = svgPoint(e);
-    moveCur(drag.tx + p.x - drag.px, drag.ty + p.y - drag.py);
+    moveCur(drag.tx + (e.clientX - drag.x) / drag.k, drag.ty + (e.clientY - drag.y) / drag.k);
   });
-  const endDrag = () => { drag = null; };
+  const endDrag = () => {
+    drag = null;
+    updateLoupe();
+  };
   board.addEventListener('pointerup', endDrag);
   board.addEventListener('pointercancel', endDrag);
+  zoomBtn.addEventListener('click', () => setZoom((zoomLevel + 1) % ZOOMS.length));
 
   document.addEventListener('keydown', (e) => {
     if (S.phase !== 'play' || !S.cur || $('#dlg-share').open) return;
@@ -213,7 +318,11 @@
     }
 
     // 結果画面では、置き場と東京都の目印を隠して地図を大きく見せる
-    board.setAttribute('viewBox', `0 0 ${M.w} ${M.h}`);
+    zoomLevel = 0;
+    cancelAnimationFrame(viewAnim);
+    applyView({ x: 0, y: 0, w: M.w, h: M.h });
+    loupe.hidden = true;
+    world.querySelectorAll('.tray, .tray-label').forEach((n) => { n.style.display = 'none'; });
     layers.placed.querySelector('.anchor-mark').style.display = 'none';
 
     $('#hud-play').hidden = true;

@@ -41,11 +41,19 @@
       <strong class="hud-name" id="result-rank"></strong>
     </header>
 
-    <svg id="board" role="img" aria-label="日本地図"></svg>
+    <div class="board-wrap">
+      <svg id="board" role="img" aria-label="日本地図"></svg>
+      <div id="loupe" hidden aria-hidden="true">
+        <svg id="loupe-svg"><use href="#world"/></svg>
+      </div>
+    </div>
 
     <div id="panel-play" class="panel">
-      <p class="hint">画面のどこをドラッグしても県が動きます</p>
-      <button id="btn-place" class="btn primary wide">ここに置く</button>
+      <p class="hint">どこをドラッグしても県が動きます。小さいときは「拡大」</p>
+      <div class="panel-row">
+        <button id="btn-zoom" class="btn">拡大</button>
+        <button id="btn-place" class="btn primary">ここに置く</button>
+      </div>
     </div>
 
     <div id="panel-result" class="panel" hidden>
